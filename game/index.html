@@ -1,0 +1,133 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>贪吃蛇</title>
+  <style>
+    :root { --bg: #f5f5f4; --fg: #1c1917; --board: #fff; --snake: #16a34a; --head: #15803d; --food: #dc2626; --btn: #e7e5e4; }
+    @media (prefers-color-scheme: dark) {
+      :root { --bg: #1c1917; --fg: #f5f5f4; --board: #292524; --snake: #4ade80; --head: #86efac; --food: #f87171; --btn: #44403c; }
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; min-height: 100vh; display: flex; flex-direction: column; align-items: center; padding: 16px; background: var(--bg); color: var(--fg); font-family: system-ui, sans-serif; }
+    h1 { margin: 8px 0; font-size: 1.5rem; }
+    .bar { display: flex; gap: 16px; align-items: center; margin-bottom: 12px; }
+    canvas { width: min(92vw, 400px); aspect-ratio: 1; background: var(--board); border-radius: 8px; box-shadow: 0 1px 4px rgb(0 0 0 / .2); touch-action: none; }
+    button { font: inherit; padding: 8px 16px; border: 0; border-radius: 8px; background: var(--btn); color: var(--fg); cursor: pointer; }
+    .pad { display: grid; grid-template-columns: repeat(3, 56px); gap: 8px; margin-top: 16px; }
+    .pad button { height: 56px; padding: 0; font-size: 1.25rem; }
+    .msg { min-height: 1.5em; margin-top: 8px; }
+  </style>
+</head>
+<body>
+  <h1>🐍 贪吃蛇</h1>
+  <div class="bar">
+    <span>分数：<b id="score">0</b></span>
+    <span>最高：<b id="best">0</b></span>
+    <button id="toggle">开始</button>
+  </div>
+  <canvas id="board" width="400" height="400"></canvas>
+  <div class="msg" id="msg">方向键 / WASD 控制，空格暂停</div>
+  <div class="pad">
+    <span></span><button data-dir="up">↑</button><span></span>
+    <button data-dir="left">←</button><button data-dir="down">↓</button><button data-dir="right">→</button>
+  </div>
+
+  <script type="module">
+    import { createGame, step, turn } from './snake.js';
+
+    const SIZE = 20;
+    const TICK_MS = 120;
+    const canvas = document.getElementById('board');
+    const ctx = canvas.getContext('2d');
+    const cell = canvas.width / SIZE;
+    const $ = (id) => document.getElementById(id);
+
+    let state = createGame({ width: SIZE, height: SIZE });
+    let timer = null;
+    let best = 0;
+    try { best = Number(localStorage.getItem('snake-best')) || 0; } catch {}
+    $('best').textContent = best;
+
+    const color = (name) => getComputedStyle(document.documentElement).getPropertyValue(name);
+
+    function draw() {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      if (state.food) {
+        ctx.fillStyle = color('--food');
+        ctx.beginPath();
+        ctx.arc((state.food.x + 0.5) * cell, (state.food.y + 0.5) * cell, cell * 0.4, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      state.snake.forEach((p, i) => {
+        ctx.fillStyle = color(i === 0 ? '--head' : '--snake');
+        ctx.fillRect(p.x * cell + 1, p.y * cell + 1, cell - 2, cell - 2);
+      });
+      $('score').textContent = state.score;
+    }
+
+    function tick() {
+      state = step(state);
+      draw();
+      if (state.over) {
+        stop();
+        if (state.score > best) {
+          best = state.score;
+          $('best').textContent = best;
+          try { localStorage.setItem('snake-best', String(best)); } catch {}
+        }
+        $('msg').textContent = state.food === null ? '🎉 你赢了！' : `游戏结束，得分 ${state.score}`;
+        $('toggle').textContent = '再来一局';
+      }
+    }
+
+    function start() {
+      if (state.over) state = createGame({ width: SIZE, height: SIZE });
+      timer = setInterval(tick, TICK_MS);
+      $('toggle').textContent = '暂停';
+      $('msg').textContent = '';
+      draw();
+    }
+
+    function stop() {
+      clearInterval(timer);
+      timer = null;
+    }
+
+    function toggle() {
+      if (timer) { stop(); $('toggle').textContent = '继续'; $('msg').textContent = '已暂停'; }
+      else start();
+    }
+
+    const KEYS = { ArrowUp: 'up', ArrowDown: 'down', ArrowLeft: 'left', ArrowRight: 'right', w: 'up', s: 'down', a: 'left', d: 'right' };
+    document.addEventListener('keydown', (e) => {
+      if (e.key === ' ') { e.preventDefault(); toggle(); return; }
+      const dir = KEYS[e.key] ?? KEYS[e.key.toLowerCase()];
+      if (!dir) return;
+      e.preventDefault();
+      if (!timer) start();
+      state = turn(state, dir);
+    });
+
+    document.querySelectorAll('[data-dir]').forEach((b) =>
+      b.addEventListener('click', () => { if (!timer) start(); state = turn(state, b.dataset.dir); }));
+    $('toggle').addEventListener('click', toggle);
+
+    // 触屏滑动
+    let touch = null;
+    canvas.addEventListener('touchstart', (e) => { touch = e.touches[0]; }, { passive: true });
+    canvas.addEventListener('touchend', (e) => {
+      if (!touch) return;
+      const t = e.changedTouches[0];
+      const dx = t.clientX - touch.clientX, dy = t.clientY - touch.clientY;
+      touch = null;
+      if (Math.max(Math.abs(dx), Math.abs(dy)) < 20) return;
+      if (!timer) start();
+      state = turn(state, Math.abs(dx) > Math.abs(dy) ? (dx > 0 ? 'right' : 'left') : (dy > 0 ? 'down' : 'up'));
+    });
+
+    draw();
+  </script>
+</body>
+</html>
